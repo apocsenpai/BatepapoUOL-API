@@ -9,7 +9,6 @@ const CREATED = 201;
 const CONFLICT = 409;
 const UNPROCESSABLE = 422;
 const INTERNAL_SERVER_ERROR = 500;
-const USERS = "participants";
 
 const server = express();
 dotenv.config();
@@ -29,20 +28,20 @@ server.post("/participants", async (request, response) => {
   const { name } = request.body;
   try {
     const nameIsAlreadyRegistered = await db
-      .collection(USERS)
+      .collection("participants")
       .findOne({ name });
 
     if (nameIsAlreadyRegistered) {
       return response.status(CONFLICT).send("Usuário já cadastrado");
     }
     const userRegister = { name, lastStatus: Date.now() };
-    await db.collection(USERS).insertOne(userRegister);
+    await db.collection("participants").insertOne(userRegister);
     const loginMessage = {
       from: name,
       to: "Todos",
       text: "Entra na sala...",
       type: "status",
-      time: dayjs().format("HH:mm:ss"),
+      time: timeNow(),
     };
     await db.collection("messages").insertOne(loginMessage);
     response.sendStatus(CREATED);
@@ -52,11 +51,37 @@ server.post("/participants", async (request, response) => {
 });
 server.get("/participants", async (request, response) => {
   try {
-    const usersList = await db.collection(USERS).find().toArray();
+    const usersList = await db.collection("participants").find().toArray();
     response.status(200).send(usersList);
   } catch (error) {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
+server.post("/messages", async (request, response) => {
+  const { to, text, type } = request.body;
+  const { user: from } = request.headers;
+
+  try {
+    const nameIsAlreadyRegistered = await db
+      .collection("participants")
+      .findOne({ from });
+    if (!nameIsAlreadyRegistered) {
+      return response.status(UNPROCESSABLE).send("Usuário não encontrado");
+    }
+    const message = {
+      from,
+      to,
+      text,
+      type,
+      time: timeNow(),
+    };
+    await db.collection("messages").insertOne(message);
+    response.status(CREATED);
+  } catch (error) {
+    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+  }
+});
+
+const timeNow = () => dayjs().format("HH:mm:ss");
 
 server.listen(process.env.PORT, () => console.log(process.env.PORT));

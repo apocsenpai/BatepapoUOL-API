@@ -9,6 +9,7 @@ const CREATED = 201;
 const CONFLICT = 409;
 const UNPROCESSABLE = 422;
 const INTERNAL_SERVER_ERROR = 500;
+const USERS = "participants";
 
 const server = express();
 dotenv.config();
@@ -28,14 +29,14 @@ server.post("/participants", async (request, response) => {
   const { name } = request.body;
   try {
     const nameIsAlreadyRegistered = await db
-      .collection("participants")
+      .collection(USERS)
       .findOne({ name });
 
     if (nameIsAlreadyRegistered) {
       return response.status(CONFLICT).send("Usuário já cadastrado");
     }
     const userRegister = { name, lastStatus: Date.now() };
-    await db.collection("participants").insertOne(userRegister);
+    await db.collection(USERS).insertOne(userRegister);
     const loginMessage = {
       from: name,
       to: "Todos",
@@ -46,6 +47,14 @@ server.post("/participants", async (request, response) => {
     await db.collection("messages").insertOne(loginMessage);
     response.sendStatus(CREATED);
   } catch (err) {
+    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+  }
+});
+server.get("/participants", async (request, response) => {
+  try {
+    const usersList = await db.collection(USERS).find().toArray();
+    response.status(200).send(usersList);
+  } catch (error) {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });

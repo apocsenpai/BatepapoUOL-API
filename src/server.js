@@ -52,7 +52,7 @@ server.post("/participants", async (request, response) => {
 server.get("/participants", async (request, response) => {
   try {
     const usersList = await db.collection("participants").find().toArray();
-    response.status(200).send(usersList);
+    response.status(OK).send(usersList);
   } catch (error) {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
@@ -64,7 +64,7 @@ server.post("/messages", async (request, response) => {
   try {
     const nameIsAlreadyRegistered = await db
       .collection("participants")
-      .findOne({ from });
+      .findOne({ name: from });
     if (!nameIsAlreadyRegistered) {
       return response.status(UNPROCESSABLE).send("Usuário não encontrado");
     }
@@ -76,7 +76,26 @@ server.post("/messages", async (request, response) => {
       time: timeNow(),
     };
     await db.collection("messages").insertOne(message);
-    response.status(CREATED);
+    response.sendStatus(CREATED);
+  } catch (error) {
+    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+  }
+});
+server.get("/messages", async (request, response) => {
+  const { limit } = request.query;
+  const { user } = request.headers;
+  try {
+    const messageList = await db
+      .collection("messages")
+      .find({ $or: [{ to: "Todos" }, { to: user }, { from: user }] })
+      .toArray();
+    if (!limit) {
+      return response.status(OK).send(messageList);
+    } else if (Number(limit) && limit > 0) {
+      return response.status(OK).send(messageList.slice(-limit));
+    } else {
+      return response.sendStatus(UNPROCESSABLE);
+    }
   } catch (error) {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }

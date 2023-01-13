@@ -110,7 +110,7 @@ server.post("/status", async (request, response) => {
       .collection("participants")
       .findOne({ name: user });
     if (!nameIsAlreadyRegistered) {
-      return response.status(NOT_FOUND);
+      return response.sendStatus(NOT_FOUND);
     }
     await db
       .collection("participants")
@@ -120,6 +120,34 @@ server.post("/status", async (request, response) => {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
+setInterval(async () => {
+  const minimumTimeAllowed = Date.now() - 10000;
+  try {
+    const absentUsers = await db
+      .collection("participants")
+      .find({ lastStatus: { $lt: minimumTimeAllowed } })
+      .toArray();
+      console.log(absentUsers);
+    if(absentUsers.length){
+      const leftMessageList = absentUsers.map(({ name }) => {
+      return {
+        from: name,
+        to: "todos",
+        text: "sai da sala...",
+        type: "status",
+        time: timeNow(),
+      };
+    });
+    await db.collection("messages").insertMany(leftMessageList);
+    await db
+      .collection("participants")
+      .deleteMany({ lastStatus: { $lt: minimumTimeAllowed } });
+    }
+
+  } catch (error) {
+    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+  }
+}, 15000);
 
 const timeNow = () => dayjs().format("HH:mm:ss");
 

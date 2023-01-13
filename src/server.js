@@ -3,6 +3,7 @@ import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 import cors from "cors";
 import dayjs from "dayjs";
+import Joi from "joi";
 
 const OK = 200;
 const CREATED = 201;
@@ -26,27 +27,41 @@ try {
 }
 const db = mongoClient.db();
 
+const userSchema = Joi.object({
+  name: Joi.string().required(),
+});
+const messageSchema = Joi.object({
+  to: Joi.string().required(),
+  text: Joi.string().required(),
+  type: Joi.any().valid("message", "private_message"),
+});
+
 server.post("/participants", async (request, response) => {
   const { name } = request.body;
   try {
-    const nameIsAlreadyRegistered = await db
-      .collection("participants")
-      .findOne({ name });
+    const { error } = userSchema.validate({ name });
+    if (!error) {
+      const nameIsAlreadyRegistered = await db
+        .collection("participants")
+        .findOne({ name });
 
-    if (nameIsAlreadyRegistered) {
-      return response.status(CONFLICT).send("Usuário já cadastrado");
+      if (nameIsAlreadyRegistered) {
+        return response.status(CONFLICT).send("Usuário já cadastrado");
+      }
+      const userRegister = { name, lastStatus: Date.now() };
+      await db.collection("participants").insertOne(userRegister);
+      const loginMessage = {
+        from: name,
+        to: "Todos",
+        text: "Entra na sala...",
+        type: "status",
+        time: timeNow(),
+      };
+      await db.collection("messages").insertOne(loginMessage);
+      response.sendStatus(CREATED);
+    } else {
+      response.sendStatus(UNPROCESSABLE);
     }
-    const userRegister = { name, lastStatus: Date.now() };
-    await db.collection("participants").insertOne(userRegister);
-    const loginMessage = {
-      from: name,
-      to: "Todos",
-      text: "Entra na sala...",
-      type: "status",
-      time: timeNow(),
-    };
-    await db.collection("messages").insertOne(loginMessage);
-    response.sendStatus(CREATED);
   } catch (err) {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
@@ -62,23 +77,27 @@ server.get("/participants", async (request, response) => {
 server.post("/messages", async (request, response) => {
   const { to, text, type } = request.body;
   const { user: from } = request.headers;
-
+  const { error } = messageSchema.validate({ to, text, type });
   try {
-    const nameIsAlreadyRegistered = await db
-      .collection("participants")
-      .findOne({ name: from });
-    if (!nameIsAlreadyRegistered) {
-      return response.status(UNPROCESSABLE).send("Usuário não encontrado");
+    if (!error) {
+      const nameIsAlreadyRegistered = await db
+        .collection("participants")
+        .findOne({ name: from });
+      if (!nameIsAlreadyRegistered) {
+        return response.status(UNPROCESSABLE).send("Usuário não encontrado");
+      }
+      const message = {
+        from,
+        to,
+        text,
+        type,
+        time: timeNow(),
+      };
+      await db.collection("messages").insertOne(message);
+      response.sendStatus(CREATED);
+    } else {
+      response.sendStatus(UNPROCESSABLE);
     }
-    const message = {
-      from,
-      to,
-      text,
-      type,
-      time: timeNow(),
-    };
-    await db.collection("messages").insertOne(message);
-    response.sendStatus(CREATED);
   } catch (error) {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
@@ -102,10 +121,10 @@ server.get("/messages", async (request, response) => {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
-
 server.post("/status", async (request, response) => {
   const { user } = request.headers;
   try {
+
     const nameIsAlreadyRegistered = await db
       .collection("participants")
       .findOne({ name: user });
@@ -127,23 +146,21 @@ setInterval(async () => {
       .collection("participants")
       .find({ lastStatus: { $lt: minimumTimeAllowed } })
       .toArray();
-      console.log(absentUsers);
-    if(absentUsers.length){
+    if (absentUsers.length) {
       const leftMessageList = absentUsers.map(({ name }) => {
-      return {
-        from: name,
-        to: "todos",
-        text: "sai da sala...",
-        type: "status",
-        time: timeNow(),
-      };
-    });
-    await db.collection("messages").insertMany(leftMessageList);
-    await db
-      .collection("participants")
-      .deleteMany({ lastStatus: { $lt: minimumTimeAllowed } });
+        return {
+          from: name,
+          to: "todos",
+          text: "sai da sala...",
+          type: "status",
+          time: timeNow(),
+        };
+      });
+      await db.collection("messages").insertMany(leftMessageList);
+      await db
+        .collection("participants")
+        .deleteMany({ lastStatus: { $lt: minimumTimeAllowed } });
     }
-
   } catch (error) {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }

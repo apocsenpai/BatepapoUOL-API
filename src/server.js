@@ -124,7 +124,6 @@ server.get("/messages", async (request, response) => {
 server.post("/status", async (request, response) => {
   const { user } = request.headers;
   try {
-
     const nameIsAlreadyRegistered = await db
       .collection("participants")
       .findOne({ name: user });
@@ -150,7 +149,7 @@ setInterval(async () => {
       const leftMessageList = absentUsers.map(({ name }) => {
         return {
           from: name,
-          to: "todos",
+          to: "Todos",
           text: "sai da sala...",
           type: "status",
           time: timeNow(),
@@ -164,7 +163,7 @@ setInterval(async () => {
   } catch (error) {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
-}, 15000);
+}, 2000);
 
 const timeNow = () => dayjs().format("HH:mm:ss");
 

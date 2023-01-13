@@ -33,7 +33,7 @@ const userSchema = Joi.object({
 const messageSchema = Joi.object({
   to: Joi.string().required(),
   text: Joi.string().required(),
-  type: Joi.any().valid("message", "private_message"),
+  type: Joi.any().valid("message", "private_message").required(),
 });
 
 server.post("/participants", async (request, response) => {
@@ -111,9 +111,9 @@ server.get("/messages", async (request, response) => {
       .find({ $or: [{ to: "Todos" }, { to: user }, { from: user }] })
       .toArray();
     if (!limit) {
-      return response.status(OK).send(messageList);
+      return response.status(OK).send([...messageList].reverse());
     } else if (Number(limit) && limit > 0) {
-      return response.status(OK).send(messageList.slice(-limit));
+      return response.status(OK).send([...messageList].slice(-limit).reverse());
     } else {
       return response.sendStatus(UNPROCESSABLE);
     }

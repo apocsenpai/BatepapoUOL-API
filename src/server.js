@@ -1,4 +1,4 @@
-import express from "express";
+import express, { response } from "express";
 import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -6,9 +6,11 @@ import dayjs from "dayjs";
 
 const OK = 200;
 const CREATED = 201;
+const NOT_FOUND = 404;
 const CONFLICT = 409;
 const UNPROCESSABLE = 422;
 const INTERNAL_SERVER_ERROR = 500;
+const PORT = 5000;
 
 const server = express();
 dotenv.config();
@@ -101,6 +103,24 @@ server.get("/messages", async (request, response) => {
   }
 });
 
+server.post("/status", async (request, response) => {
+  const { user } = request.headers;
+  try {
+    const nameIsAlreadyRegistered = await db
+      .collection("participants")
+      .findOne({ name: user });
+    if (!nameIsAlreadyRegistered) {
+      return response.status(NOT_FOUND);
+    }
+    await db
+      .collection("participants")
+      .updateOne({ name: user }, { $set: { lastStatus: Date.now() } });
+    response.sendStatus(OK);
+  } catch (error) {
+    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+  }
+});
+
 const timeNow = () => dayjs().format("HH:mm:ss");
 
-server.listen(process.env.PORT, () => console.log(process.env.PORT));
+server.listen(PORT, () => console.log(PORT));

@@ -1,5 +1,5 @@
-import express, { response } from "express";
-import { MongoClient } from "mongodb";
+import express, { request, response } from "express";
+import { MongoClient, ObjectId } from "mongodb";
 import dotenv from "dotenv";
 import cors from "cors";
 import dayjs from "dayjs";
@@ -7,6 +7,7 @@ import Joi from "joi";
 
 const OK = 200;
 const CREATED = 201;
+const UNAUTHORIZED = 401;
 const NOT_FOUND = 404;
 const CONFLICT = 409;
 const UNPROCESSABLE = 422;
@@ -41,11 +42,7 @@ server.post("/participants", async (request, response) => {
   try {
     const { error } = userSchema.validate({ name });
     if (!error) {
-      const nameIsAlreadyRegistered = await db
-        .collection("participants")
-        .findOne({ name });
-
-      if (nameIsAlreadyRegistered) {
+      if (await nameIsAlreadyRegistered(name)) {
         return response.status(CONFLICT).send("Usuário já cadastrado");
       }
       const userRegister = { name, lastStatus: Date.now() };
@@ -80,10 +77,7 @@ server.post("/messages", async (request, response) => {
   const { error } = messageSchema.validate({ to, text, type });
   try {
     if (!error) {
-      const nameIsAlreadyRegistered = await db
-        .collection("participants")
-        .findOne({ name: from });
-      if (!nameIsAlreadyRegistered) {
+      if (!(await nameIsAlreadyRegistered(from))) {
         return response.status(UNPROCESSABLE).send("Usuário não encontrado");
       }
       const message = {
@@ -108,7 +102,7 @@ server.get("/messages", async (request, response) => {
   try {
     const messageList = await db
       .collection("messages")
-      .find({ $or: [{ to: "Todos" }, { to: user }, { from: user }] })
+      .find({ $or: [{ type: "message" }, { to: user }, { from: user }] })
       .toArray();
     if (!limit) {
       return response.status(OK).send([...messageList].reverse());
@@ -121,13 +115,64 @@ server.get("/messages", async (request, response) => {
     return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
+server.delete("/messages/:messageId", async (request, response) => {
+  const { user } = request.headers;
+  const { messageId } = request.params;
+  try {
+    const isExistMessage = await db
+      .collection("messages")
+      .findOne({ _id: ObjectId(messageId) });
+    if (!isExistMessage) {
+      return response.sendStatus(NOT_FOUND);
+    } else if (isExistMessage.from !== user) {
+      return response.sendStatus(UNAUTHORIZED);
+    }
+    await db.collection("messages").deleteOne({ _id: ObjectId(messageId) });
+    response.sendStatus(OK);
+  } catch (error) {
+    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+  }
+});
+server.put("/messages/:messageId", async (request, response) => {
+  const { to, text, type } = request.body;
+  const { user: from } = request.headers;
+  const { messageId } = request.params;
+  const { error } = messageSchema.validate({ to, text, type });
+  try {
+    if (!error) {
+      if (!(await nameIsAlreadyRegistered(from))) {
+        return response.status(UNPROCESSABLE).send("Usuário não encontrado");
+      }
+      const isExistMessage = await db
+        .collection("messages")
+        .findOne({ _id: ObjectId(messageId) });
+      if (!isExistMessage) {
+        return response.sendStatus(NOT_FOUND);
+      } else if (isExistMessage.from !== from) {
+        return response.sendStatus(UNAUTHORIZED);
+      }
+      const message = {
+        from,
+        to,
+        text,
+        type,
+        time: timeNow(),
+      };
+      await db
+        .collection("messages")
+        .updateOne({ _id: ObjectId(messageId) }, { $set: message });
+      response.sendStatus(CREATED);
+    } else {
+      response.sendStatus(UNPROCESSABLE);
+    }
+  } catch (error) {
+    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+  }
+});
 server.post("/status", async (request, response) => {
   const { user } = request.headers;
   try {
-    const nameIsAlreadyRegistered = await db
-      .collection("participants")
-      .findOne({ name: user });
-    if (!nameIsAlreadyRegistered) {
+    if (!(await nameIsAlreadyRegistered(from))) {
       return response.sendStatus(NOT_FOUND);
     }
     await db
@@ -166,5 +211,7 @@ setInterval(async () => {
 }, 2000);
 
 const timeNow = () => dayjs().format("HH:mm:ss");
+const nameIsAlreadyRegistered = (name) =>
+  db.collection("participants").findOne({ name });
 
 server.listen(PORT, () => console.log(PORT));

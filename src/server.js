@@ -1,5 +1,6 @@
-import express, { request, response } from "express";
+import express from "express";
 import { MongoClient, ObjectId } from "mongodb";
+import { stripHtml } from "string-strip-html";
 import dotenv from "dotenv";
 import cors from "cors";
 import dayjs from "dayjs";
@@ -36,9 +37,12 @@ const messageSchema = Joi.object({
   text: Joi.string().required(),
   type: Joi.any().valid("message", "private_message").required(),
 });
+const messageIdSchema = Joi.object({
+  messageId: Joi.string().hex().length(24),
+});
 
 server.post("/participants", async (request, response) => {
-  const { name } = request.body;
+  const name = sanitizeUserName(request.body.name);
   try {
     const { error } = userSchema.validate({ name });
     if (!error) {
@@ -60,7 +64,7 @@ server.post("/participants", async (request, response) => {
       response.sendStatus(UNPROCESSABLE);
     }
   } catch (err) {
-    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+    response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
 server.get("/participants", async (request, response) => {
@@ -68,11 +72,11 @@ server.get("/participants", async (request, response) => {
     const usersList = await db.collection("participants").find().toArray();
     response.status(OK).send(usersList);
   } catch (error) {
-    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+    response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
 server.post("/messages", async (request, response) => {
-  const { to, text, type } = request.body;
+  const { to, text, type } = sanitizeMessage(request.body);
   const { user: from } = request.headers;
   const { error } = messageSchema.validate({ to, text, type });
   try {
@@ -93,7 +97,7 @@ server.post("/messages", async (request, response) => {
       response.sendStatus(UNPROCESSABLE);
     }
   } catch (error) {
-    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+    response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
 server.get("/messages", async (request, response) => {
@@ -109,37 +113,43 @@ server.get("/messages", async (request, response) => {
     } else if (Number(limit) && limit > 0) {
       return response.status(OK).send([...messageList].slice(-limit).reverse());
     } else {
-      return response.sendStatus(UNPROCESSABLE);
+      response.sendStatus(UNPROCESSABLE);
     }
   } catch (error) {
-    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+    response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
 server.delete("/messages/:messageId", async (request, response) => {
   const { user } = request.headers;
   const { messageId } = request.params;
+  const { error } = messageIdSchema.validate({ messageId });
   try {
-    const isExistMessage = await db
-      .collection("messages")
-      .findOne({ _id: ObjectId(messageId) });
-    if (!isExistMessage) {
-      return response.sendStatus(NOT_FOUND);
-    } else if (isExistMessage.from !== user) {
-      return response.sendStatus(UNAUTHORIZED);
+    if (!error) {
+      const isExistMessage = await db
+        .collection("messages")
+        .findOne({ _id: ObjectId(messageId) });
+      if (!isExistMessage) {
+        return response.sendStatus(NOT_FOUND);
+      } else if (isExistMessage.from !== user) {
+        return response.sendStatus(UNAUTHORIZED);
+      }
+      await db.collection("messages").deleteOne({ _id: ObjectId(messageId) });
+      response.sendStatus(OK);
+    } else {
+      response.sendStatus(UNPROCESSABLE);
     }
-    await db.collection("messages").deleteOne({ _id: ObjectId(messageId) });
-    response.sendStatus(OK);
   } catch (error) {
-    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+    response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
 server.put("/messages/:messageId", async (request, response) => {
-  const { to, text, type } = request.body;
+  const { to, text, type } = sanitizeMessage(request.body);
   const { user: from } = request.headers;
   const { messageId } = request.params;
-  const { error } = messageSchema.validate({ to, text, type });
+  const { error: messageError } = messageSchema.validate({ to, text, type });
+  const { error: messageIdError } = messageIdSchema.validate({ messageId });
   try {
-    if (!error) {
+    if (!messageError && !messageIdError) {
       if (!(await nameIsAlreadyRegistered(from))) {
         return response.status(UNPROCESSABLE).send("Usuário não encontrado");
       }
@@ -166,7 +176,7 @@ server.put("/messages/:messageId", async (request, response) => {
       response.sendStatus(UNPROCESSABLE);
     }
   } catch (error) {
-    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+    response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
 server.post("/status", async (request, response) => {
@@ -180,7 +190,7 @@ server.post("/status", async (request, response) => {
       .updateOne({ name: user }, { $set: { lastStatus: Date.now() } });
     response.sendStatus(OK);
   } catch (error) {
-    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+    response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
   }
 });
 setInterval(async () => {
@@ -206,12 +216,19 @@ setInterval(async () => {
         .deleteMany({ lastStatus: { $lt: minimumTimeAllowed } });
     }
   } catch (error) {
-    return response.status(INTERNAL_SERVER_ERROR).send("Erro no servidor!");
+    console.log(error);
   }
-}, 2000);
+}, 15000);
 
 const timeNow = () => dayjs().format("HH:mm:ss");
 const nameIsAlreadyRegistered = (name) =>
   db.collection("participants").findOne({ name });
-
+const sanitizeUserName = (name) => stripHtml(name).result.trim();
+const sanitizeMessage = (bodyMessage) => {
+  return {
+    to: stripHtml(bodyMessage.to).result.trim(),
+    text: stripHtml(bodyMessage.text).result.trim(),
+    type: stripHtml(bodyMessage.type).result.trim(),
+  };
+};
 server.listen(PORT, () => console.log(PORT));

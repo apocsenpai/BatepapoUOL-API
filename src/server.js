@@ -42,10 +42,11 @@ const messageIdSchema = Joi.object({
 });
 
 server.post("/participants", async (request, response) => {
-  const name = sanitizeUserName(request.body.name);
+  const nameBody = request.body.name;
+  const { error } = userSchema.validate({ name: nameBody });
   try {
-    const { error } = userSchema.validate({ name });
     if (!error) {
+      const name = sanitizeUserName(nameBody);
       if (await nameIsAlreadyRegistered(name)) {
         return response.status(CONFLICT).send("Usuário já cadastrado");
       }
@@ -76,11 +77,12 @@ server.get("/participants", async (request, response) => {
   }
 });
 server.post("/messages", async (request, response) => {
-  const { to, text, type } = sanitizeMessage(request.body);
+  const messageBody = request.body;
   const { user: from } = request.headers;
-  const { error } = messageSchema.validate({ to, text, type });
+  const { error } = messageSchema.validate(messageBody);
   try {
     if (!error) {
+      const { to, text, type } = sanitizeMessage(messageBody);
       if (!(await nameIsAlreadyRegistered(from))) {
         return response.status(UNPROCESSABLE).send("Usuário não encontrado");
       }
@@ -106,7 +108,14 @@ server.get("/messages", async (request, response) => {
   try {
     const messageList = await db
       .collection("messages")
-      .find({ $or: [{ type: "message" }, { to: user }, { from: user }] })
+      .find({
+        $or: [
+          { type: "message" },
+          { to: user },
+          { to: "Todos" },
+          { from: user },
+        ],
+      })
       .toArray();
     if (!limit) {
       return response.status(OK).send([...messageList].reverse());
@@ -143,13 +152,14 @@ server.delete("/messages/:messageId", async (request, response) => {
   }
 });
 server.put("/messages/:messageId", async (request, response) => {
-  const { to, text, type } = sanitizeMessage(request.body);
+  const messageBody = request.body;
   const { user: from } = request.headers;
   const { messageId } = request.params;
-  const { error: messageError } = messageSchema.validate({ to, text, type });
+  const { error: messageError } = messageSchema.validate(messageBody);
   const { error: messageIdError } = messageIdSchema.validate({ messageId });
   try {
     if (!messageError && !messageIdError) {
+      const {to, text, type} = sanitizeMessage(messageBody);
       if (!(await nameIsAlreadyRegistered(from))) {
         return response.status(UNPROCESSABLE).send("Usuário não encontrado");
       }
@@ -171,7 +181,7 @@ server.put("/messages/:messageId", async (request, response) => {
       await db
         .collection("messages")
         .updateOne({ _id: ObjectId(messageId) }, { $set: message });
-      response.sendStatus(CREATED);
+      response.sendStatus(OK);
     } else {
       response.sendStatus(UNPROCESSABLE);
     }
@@ -182,9 +192,10 @@ server.put("/messages/:messageId", async (request, response) => {
 server.post("/status", async (request, response) => {
   const { user } = request.headers;
   try {
-    if (!(await nameIsAlreadyRegistered(from))) {
+    if (!(await nameIsAlreadyRegistered(user))) {
       return response.sendStatus(NOT_FOUND);
     }
+    console.log("lalaal")
     await db
       .collection("participants")
       .updateOne({ name: user }, { $set: { lastStatus: Date.now() } });
